@@ -23,6 +23,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.media.AudioManager;
 import android.media.audiofx.AudioEffect;
 import android.net.Uri;
@@ -55,6 +57,9 @@ import com.andrew.apollo.MusicPlaybackService;
 import com.andrew.apollo.R;
 import com.andrew.apollo.adapters.PagerAdapter;
 import com.andrew.apollo.cache.ImageFetcher;
+import com.andrew.apollo.listeners.OnAlbumSwipeBackgroundChanger;
+import com.andrew.apollo.loaders.QueueLoader;
+import com.andrew.apollo.model.Song;
 import com.andrew.apollo.ui.fragments.QueueFragment;
 import com.andrew.apollo.menu.DeleteDialog;
 import com.andrew.apollo.utils.ApolloUtils;
@@ -68,6 +73,7 @@ import com.andrew.apollo.widgets.RepeatingImageButton;
 import com.andrew.apollo.widgets.ShuffleButton;
 
 import java.lang.ref.WeakReference;
+import java.util.List;
 
 /**
  * Apollo's "now playing" interface.
@@ -119,7 +125,7 @@ public class AudioPlayerActivity extends FragmentActivity implements ServiceConn
     // Queue switch
     private ImageView mQueueSwitch;
 
-    // Progess
+    // Progress
     private SeekBar mProgress;
 
     // Broadcast receiver
@@ -131,7 +137,7 @@ public class AudioPlayerActivity extends FragmentActivity implements ServiceConn
     // View pager
     private ViewPager mViewPager;
 
-    // Pager adpater
+    // Pager adapter
     private PagerAdapter mPagerAdapter;
 
     // ViewPager container
@@ -145,6 +151,12 @@ public class AudioPlayerActivity extends FragmentActivity implements ServiceConn
 
     // Theme resources
     private ThemeUtils mResources;
+
+    // The Queue
+    private static List<Song> mQueue;
+
+    // Background-swipe-controller
+    private static OnAlbumSwipeBackgroundChanger mBackgroundController;
 
     private long mPosOverride = -1;
 
@@ -165,7 +177,7 @@ public class AudioPlayerActivity extends FragmentActivity implements ServiceConn
     protected void onCreate(final Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Initialze the theme resources
+        // Initialize the theme resources
         mResources = new ThemeUtils(this);
         // Set the overflow style
         mResources.setOverflowStyle(this);
@@ -501,7 +513,7 @@ public class AudioPlayerActivity extends FragmentActivity implements ServiceConn
 
         // Initialize the ViewPager
         mViewPager = (ViewPager)findViewById(R.id.audio_player_pager);
-        // Attch the adapter
+        // Attach the adapter
         mViewPager.setAdapter(mPagerAdapter);
         // Offscreen pager loading limit
         mViewPager.setOffscreenPageLimit(mPagerAdapter.getCount() - 1);
@@ -534,12 +546,14 @@ public class AudioPlayerActivity extends FragmentActivity implements ServiceConn
         // Progress
         mProgress = (SeekBar)findViewById(android.R.id.progress);
 
-        // Set the repeat listner for the previous button
+        // Set the repeat listener for the previous button
         mPreviousButton.setRepeatListener(mRewindListener);
-        // Set the repeat listner for the next button
+        // Set the repeat listener for the next button
         mNextButton.setRepeatListener(mFastForwardListener);
         // Update the progress
         mProgress.setOnSeekBarChangeListener(this);
+        // Init art switcher
+        initSwipeListener();
     }
 
     /**
@@ -558,6 +572,56 @@ public class AudioPlayerActivity extends FragmentActivity implements ServiceConn
         mImageFetcher.loadCurrentArtwork(mAlbumArtSmall);
         // Update the current time
         queueNextRefresh(1);
+        // Update Background Art
+        reloadSwipeBackgrounds();
+
+    }
+
+    private void initSwipeListener() {
+
+        List<Song> queuePre = new QueueLoader(this).loadInBackground();
+        if(mQueue != null && mQueue.size() == 0 || queuePre.size() > 0) mQueue = queuePre;
+
+        ImageView mAlbumBackground = (ImageView) findViewById(R.id.audio_player_album_art_background);
+
+        final Context mContext = this;
+        mBackgroundController = new OnAlbumSwipeBackgroundChanger(mAlbumBackground) {
+            @Override
+            public void previous() {
+                MusicUtils.previous(mContext);
+            }
+
+            @Override
+            public void next() {
+                MusicUtils.next();
+            }
+        };
+        reloadSwipeBackgrounds();
+        mAlbumArt.setOnTouchListener(mBackgroundController);
+
+    }
+
+    private void reloadSwipeBackgrounds() {
+        Drawable mPrev, mNext;
+
+        MusicUtils.refresh();
+        try {
+            Song nextSong = mQueue.get( MusicUtils.getQueuePosition() + 1);
+            mNext = new BitmapDrawable(getResources(), mImageFetcher.getCachedArtwork(nextSong.mAlbumName, nextSong.mArtistName, nextSong.mSongId));
+        } catch (IndexOutOfBoundsException e) {
+            Song nextSong = mQueue.get( 0);
+            mNext = new BitmapDrawable(getResources(), mImageFetcher.getCachedArtwork(nextSong.mAlbumName, nextSong.mArtistName, nextSong.mSongId));
+        }
+
+        try {
+            Song previousSong = mQueue.get( MusicUtils.getQueuePosition() - 1);
+            mPrev = new BitmapDrawable(getResources(), mImageFetcher.getCachedArtwork(previousSong.mAlbumName, previousSong.mArtistName, previousSong.mSongId));
+        } catch (IndexOutOfBoundsException e) {
+            Song nextSong = mQueue.get( mQueue.size() - 1);
+            mPrev = new BitmapDrawable(getResources(), mImageFetcher.getCachedArtwork(nextSong.mAlbumName, nextSong.mArtistName, nextSong.mSongId));
+        }
+
+        mBackgroundController.setImages(mPrev, mNext);
 
     }
 
